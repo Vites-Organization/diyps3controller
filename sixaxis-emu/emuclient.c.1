@@ -20,10 +20,11 @@
 #include <SDL/SDL.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <limits.h>
+#include <pthread.h>
 #include "sixaxis.h"
 #include "dump.h"
-#include <pthread.h>
-#include "macros.h"
+
 
 #define SCREEN_WIDTH  320
 #define SCREEN_HEIGHT 240
@@ -37,6 +38,7 @@ static int done = 0;
 static double multiplier = DEFAULT_MULTIPLIER;
 static int dead_zone = DEFAULT_DEAD_ZONE;
 static int dead_zone_calibration = 0;
+static int pass_to_console = 0;
 
 SDL_Surface *screen = NULL;
 
@@ -97,10 +99,7 @@ void move_y(int y)
 void key(int sym, int down)
 {
 	int index = -1;
-	pthread_t thread;
-	pthread_attr_t thread_attr;
-	SDLKey key;
-
+	//printf("sym=%i  down=%i\n",sym,down);
 	switch (sym) {
 	case SDLK_RSHIFT:	index = sb_ps;		break;
 
@@ -110,7 +109,7 @@ void key(int sym, int down)
 	case 'r':		index = sb_square;	break;
 
 	case SDLK_TAB: 		index = sb_select;	break;
-	case SDLK_BACKSPACE:    index = sb_start;	break;
+	case 'x':		index = sb_start;	break;
 
 	case 't':        	index = sb_l2;		break;
 	case 'k':        	index = sb_l1;		break;
@@ -119,10 +118,11 @@ void key(int sym, int down)
 	case SDLK_LSHIFT:       index = sb_l3;		break;
 	case 'f':	        index = sb_r3;		break;
 	
-	case '&':		index = sb_up;		break;
-	case 'é':	 	index = sb_down;	break;
-	case '"':	 	index = sb_left;	break;
-	case '\'': 		index = sb_right;	break;
+	case 'u':		index = sb_up;		break;
+	case SDLK_UP:		index = sb_up;		break;
+	case SDLK_DOWN: 	index = sb_down;	break;
+	case SDLK_LEFT:		index = sb_left;	break;
+	case SDLK_RIGHT:	index = sb_right;	break;
 	
 	case 'q':		down?move_x(-127):move_x(0);	break;
 	case 'z':	 	down?move_y(-127):move_y(0);	break;
@@ -134,7 +134,7 @@ void key(int sym, int down)
 	case SDLK_KP_PLUS: 	if(down) { multiplier += 0.5; printf("multiplier: %e\n", multiplier); } break;
 	case SDLK_KP_DIVIDE:	if(down && dead_zone_calibration) { dead_zone -= 1; printf("dead_zone: %d\n", dead_zone); } break;
 	case SDLK_KP_MULTIPLY: 	if(down && dead_zone_calibration) { dead_zone += 1; printf("dead_zone: %d\n", dead_zone); } break;
-	case SDLK_INSERT:
+	case SDLK_F1:
 		if(down)
 		{
 			if(dead_zone_calibration)
@@ -149,15 +149,10 @@ void key(int sym, int down)
 			}
 		}
 		break;
-	case SDLK_F1:
-		key = SDLK_F1;
-		pthread_attr_init(&thread_attr);
-		pthread_attr_setdetachstate(&thread_attr, PTHREAD_CREATE_DETACHED);
-		pthread_create( &thread, &thread_attr, (void*)macro, (void*) &key);
-		break;
-	}
+	} //end of CASE statement
 
 	if (index >= 0) {
+		//printf("sending index=%i  down=%i\n",index,down);
 		state.user.button[index].pressed = down ? 1 : 0;
 		state.user.button[index].value = down ? 255 : 0;
 	}
@@ -207,8 +202,6 @@ int main(int argc, char *argv[])
 	int change;
 	int send_command;
 	
-	initialize_macros();
-	
 	sixaxis_init(&state);
 	for (i = 0; sixaxis_assemble[i].func; i++)
 		if (sixaxis_assemble[i].type == HID_TYPE_INPUT &&
@@ -226,8 +219,8 @@ int main(int argc, char *argv[])
 	SDL_ShowCursor(SDL_DISABLE);
 
 	sockfd = tcpconnect();
-
 	done = 0;
+	bool startnewthread = false;
 	while(!done) 
 	{
 		SDL_PumpEvents();
@@ -249,9 +242,16 @@ int main(int argc, char *argv[])
 					done = 1;
 					break;
 				case SDL_KEYDOWN:
+					if(event->key.keysym.sym == 283){
+						//lets create a new thread with the script reading stuff
+						pthread_t thread2;
+						int threadexit;
+						threadexit = pthread_create( &thread2, NULL, (void*)scriptthread, (void*) startnewthread);
+					}
 					key(event->key.keysym.sym, 1);
 					break;
 				case SDL_KEYUP:
+					//printf("KEYUP\n");
 					key(event->key.keysym.sym, 0);
 					break;
 				case SDL_MOUSEMOTION:
@@ -318,8 +318,6 @@ int main(int argc, char *argv[])
 
 	printf("Exiting\n");
 	SDL_Quit();
-	
-	free_macros();
 	
 	return 0;
 }
